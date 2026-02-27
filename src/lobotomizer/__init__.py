@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from torch.utils.data import DataLoader
 
 __version__ = "0.1.0"
-__all__ = ["Pipeline", "Prune", "Quantize", "Stage", "compress"]
+__all__ = ["Pipeline", "Prune", "Quantize", "Result", "Stage", "compress"]
 
 
 def compress(
