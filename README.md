@@ -122,6 +122,20 @@ Model → [Stage 1] → [Stage 2] → ... → Result
 
 The original model is never mutated.
 
+## Examples
+
+See [`examples/`](examples/) for complete, runnable scripts:
+
+| Script | What it does |
+|---|---|
+| [`resnet50_edge.py`](examples/resnet50_edge.py) | ResNet50 pruned + quantized for edge deployment |
+| [`bert_quantize.py`](examples/bert_quantize.py) | BERT-base quantized for faster CPU inference |
+| [`whisper_compress.py`](examples/whisper_compress.py) | Whisper small compressed for on-device transcription |
+| [`yolo_edge.py`](examples/yolo_edge.py) | YOLOv8n compressed for real-time edge inference |
+| [`mobilevit_compress.py`](examples/mobilevit_compress.py) | MobileViT further compressed for ultra-constrained devices |
+
+Each script is self-contained and falls back to a dummy model if optional dependencies aren't installed.
+
 ## Roadmap
 
 - [x] **v0.1** — Prune, Quantize, Pipeline, profiler, recipes, CLI
