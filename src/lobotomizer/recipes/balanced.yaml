@@ -1,4 +1,9 @@
-# Balanced compression recipe — placeholder
 name: balanced
-description: A balanced compression recipe targeting moderate size reduction with minimal quality loss.
-stages: []
+description: "Structured pruning + dynamic int8 quantization"
+stages:
+  - type: prune
+    method: l1_unstructured
+    sparsity: 0.25
+  - type: quantize
+    method: dynamic
+    dtype: qint8
