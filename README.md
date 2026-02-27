@@ -1,2 +1,4 @@
-# lobotomizer
-Lobotomize (quantize, prune, knowledge distill) your models
+# Lobotomizer
+Composable model compression for PyTorch.
+
+Under construction.

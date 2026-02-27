@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lobotomizer"
+version = "0.1.0"
+description = "Composable model compression for PyTorch"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.0",
+    "numpy",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+pruning = ["torch-pruning"]
+quantize = ["bitsandbytes"]
+all = ["lobotomizer[dev,pruning,quantize]"]
+
+[project.scripts]
+lobotomize = "lobotomizer.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
