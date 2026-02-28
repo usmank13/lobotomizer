@@ -222,3 +222,37 @@ class TestCompress:
         x = torch.randn(1, 3, 32, 32)
         out = result.model(x)
         assert out.shape == (1, 10)
+
+
+class TestSparsityReport:
+    """Tests for Result.sparsity_report()."""
+
+    def test_report_after_pruning(self):
+        model = nn.Sequential(nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 10))
+        result = compress(model, recipe=[Prune(method="l1_unstructured", sparsity=0.5)])
+        report = result.sparsity_report()
+        assert "50.0%" in report
+        assert "TOTAL" in report
+
+    def test_report_after_quantize(self):
+        model = nn.Sequential(nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 10))
+        result = compress(model, recipe=[Quantize(method="dynamic")])
+        report = result.sparsity_report()
+        assert "TOTAL" in report
+        # Quantize without pruning should show ~0% sparsity
+        # Quantize without pruning should show very low sparsity
+        assert "TOTAL" in report  # already checked above
+        # Sparsity should be under 5% (just natural zeros from quantization)
+        import re
+        total_line = [l for l in report.split("\n") if "TOTAL" in l][0]
+        match = re.search(r"(\d+\.\d+)%", total_line)
+        assert match and float(match.group(1)) < 5.0
+
+    def test_report_no_double_counting(self):
+        model = nn.Sequential(nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 10))
+        result = compress(model, recipe="balanced")
+        report = result.sparsity_report()
+        # Should not have duplicate layers
+        lines = [l for l in report.split("\n") if "LinearPackedParams" in l or "Linear " in l]
+        # At most 2 weight-bearing layers (not 4)
+        assert len(lines) <= 2

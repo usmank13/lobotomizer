@@ -73,6 +73,92 @@ class Result:
         lines.append(bot)
         return "\n".join(lines)
 
+    def sparsity_report(self) -> str:
+        """Return a per-layer sparsity report for the compressed model.
+
+        Shows the fraction of zero weights in each layer, useful for
+        understanding what unstructured pruning actually did.
+        """
+        rows: list[tuple[str, str, str, str, str]] = []
+        total_params = 0
+        total_zeros = 0
+
+        # Track modules with _weight_bias to avoid double-counting
+        # (quantized modules expose weights on both parent and _packed_params child)
+        modules_with_wb = {
+            id(m) for m in self._compressed_model.modules()
+            if hasattr(m, "_weight_bias")
+        }
+
+        for name, module in self._compressed_model.named_modules():
+            # Get weight tensor — handle both regular and quantized modules
+            weight = None
+            if hasattr(module, "weight") and isinstance(getattr(module, "weight", None), torch.Tensor):
+                weight = module.weight
+            elif hasattr(module, "_weight_bias"):
+                # Skip if a child also has _weight_bias (count from leaf only)
+                has_child_wb = any(
+                    id(child) in modules_with_wb
+                    for child in module.children()
+                )
+                if has_child_wb:
+                    continue
+                try:
+                    w, _ = module._weight_bias()
+                    weight = w
+                except (AttributeError, RuntimeError):
+                    pass
+
+            if weight is None:
+                continue
+
+            numel = weight.numel()
+            zeros = int((weight == 0).sum().item())
+            total_params += numel
+            total_zeros += zeros
+            sparsity = zeros / numel if numel > 0 else 0.0
+            shape = "×".join(str(s) for s in weight.shape)
+
+            rows.append((
+                name or "(root)",
+                type(module).__name__,
+                shape,
+                f"{zeros:,}/{numel:,}",
+                f"{sparsity:.1%}",
+            ))
+
+        if not rows:
+            return "No weight tensors found."
+
+        # Add total row
+        total_sparsity = total_zeros / total_params if total_params > 0 else 0.0
+        rows.append((
+            "TOTAL", "", "",
+            f"{total_zeros:,}/{total_params:,}",
+            f"{total_sparsity:.1%}",
+        ))
+
+        headers = ("Layer", "Type", "Shape", "Zeros/Total", "Sparsity")
+        widths = [
+            max(len(headers[i]), *(len(r[i]) for r in rows))
+            for i in range(5)
+        ]
+
+        def _row(vals: tuple[str, ...], sep: str = "│") -> str:
+            return f"{sep} " + f" {sep} ".join(v.ljust(w) for v, w in zip(vals, widths)) + f" {sep}"
+
+        top = "┌─" + "─┬─".join("─" * w for w in widths) + "─┐"
+        mid = "├─" + "─┼─".join("─" * w for w in widths) + "─┤"
+        bot = "└─" + "─┴─".join("─" * w for w in widths) + "─┘"
+
+        lines = [top, _row(headers), mid]
+        for i, r in enumerate(rows):
+            if i == len(rows) - 1:  # separator before total
+                lines.append(mid)
+            lines.append(_row(r))
+        lines.append(bot)
+        return "\n".join(lines)
+
     def save(self, path: str) -> None:
         """Save compressed model and metadata to *path*."""
         p = pathlib.Path(path)
