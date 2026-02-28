@@ -59,14 +59,16 @@ lobotomize --list-recipes
 
 ### Summary output
 
+Real results from compressing [Whisper-tiny](https://huggingface.co/openai/whisper-tiny) (39M params) with dynamic int8 quantization:
+
 ```
-┌──────────────────────┬──────────┬──────────┬────────┐
-│ Metric               │ Before   │ After    │ Δ      │
-├──────────────────────┼──────────┼──────────┼────────┤
-│ param_count          │ 9898     │ 9898     │ +0.0%  │
-│ param_count_trainable│ 9898     │ 0        │ -100.0%│
-│ size_mb              │ 0.0395   │ 0.0148   │ -62.5% │
-└──────────────────────┴──────────┴──────────┴────────┘
+┌───────────────────────┬────────────┬────────────┬────────┐
+│ Metric                │ Before     │ After      │ Δ      │
+├───────────────────────┼────────────┼────────────┼────────┤
+│ param_count           │ 37,760,640 │ 37,760,640 │ +0.0%  │
+│ param_count_trainable │ 37,760,640 │ 21,245,568 │ -43.7% │
+│ size_mb               │ 144.10     │ 97.02      │ -32.7% │
+└───────────────────────┴────────────┴────────────┴────────┘
 ```
 
 ## Available Stages
