@@ -43,52 +43,59 @@ def profile_model(
 
 
 def _count_params(model: nn.Module, trainable_only: bool = False) -> int:
-    """Count parameters including those in quantized modules.
+    """Count parameters, handling both regular and quantized modules.
 
-    Quantized modules (e.g. dynamic quantized Linear) store weights in
-    packed params rather than exposing them via ``.parameters()``. We
-    detect these via ``_weight_bias()`` on leaf modules (modules whose
-    parent also has ``_weight_bias`` are skipped to avoid double-counting).
+    torchao-quantized modules still expose ``.parameters()`` but they
+    contain packed int8 weights + scale/zero-point tensors, which inflates
+    naive counts.  We walk leaf Linear modules and use their
+    ``in_features``/``out_features`` to compute the *effective* param count
+    for quantized layers, falling back to ``.numel()`` for regular params.
     """
-    # First, try the normal .parameters() path
+    # Collect IDs of parameters owned by quantized Linear modules so we
+    # can skip them in the regular parameter walk.
+    quantized_param_ids: set[int] = set()
+    effective_quantized_count = 0
+
+    for module in model.modules():
+        if not isinstance(module, nn.Linear):
+            continue
+        # Detect torchao quantization: weight won't be a plain Tensor
+        weight = getattr(module, "weight", None)
+        if weight is None:
+            continue
+        # Detect torchao quantization: check the weight (or its .data)
+        # for torchao types, which aren't plain nn.Parameter/Tensor
+        w_to_check = weight.data if isinstance(weight, nn.Parameter) else weight
+        w_module = type(w_to_check).__module__ or ""
+        is_quantized = "torchao" in w_module
+        if not is_quantized:
+            # Fallback: non-float dtype on a plain parameter
+            try:
+                is_quantized = not weight.dtype.is_floating_point
+            except Exception:
+                pass
+
+        if is_quantized:
+            # Use the module's shape attributes for effective count
+            effective_quantized_count += module.in_features * module.out_features
+            if module.bias is not None:
+                effective_quantized_count += module.out_features
+            # Mark all parameters of this module to skip later
+            for p in module.parameters():
+                quantized_param_ids.add(id(p))
+
+    # Count remaining (non-quantized) parameters normally
     regular_count = sum(
         p.numel() for p in model.parameters()
-        if not trainable_only or p.requires_grad
+        if id(p) not in quantized_param_ids
+        and (not trainable_only or p.requires_grad)
     )
 
-    if regular_count > 0:
-        # Model has normal parameters — no quantized counting needed
+    # For trainable_only, quantized params are frozen so return 0 for them
+    if trainable_only:
         return regular_count
 
-    # Model has no .parameters() — likely fully quantized.
-    # Walk leaf modules with _weight_bias() to count packed weights.
-    # Only count on modules that DON'T have a child with _weight_bias
-    # (avoids double-counting parent + _packed_params child).
-    modules_with_wb = {
-        id(m) for m in model.modules() if hasattr(m, "_weight_bias")
-    }
-
-    quantized_count = 0
-    for module in model.modules():
-        if not hasattr(module, "_weight_bias"):
-            continue
-        # Skip if any child also has _weight_bias (we'll count from the child)
-        has_child_wb = any(
-            id(child) in modules_with_wb
-            for child in module.children()
-        )
-        if has_child_wb:
-            continue
-
-        try:
-            w, b = module._weight_bias()
-            quantized_count += w.numel()
-            if b is not None:
-                quantized_count += b.numel()
-        except (AttributeError, RuntimeError):
-            pass
-
-    return quantized_count
+    return regular_count + effective_quantized_count
 
 
 def _estimate_flops(

@@ -75,6 +75,10 @@ class Quantize(Stage):
 
         if self._method == "dynamic":
             quantize_(model, Int8DynamicActivationInt8WeightConfig())
+            # Re-tie weights that deepcopy may have duplicated
+            # (e.g. Whisper's proj_out ↔ decoder.embed_tokens)
+            if hasattr(model, "tie_weights") and callable(model.tie_weights):
+                model.tie_weights()
             return model
 
         # Static quantization
