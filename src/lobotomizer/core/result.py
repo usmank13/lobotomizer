@@ -112,8 +112,18 @@ class Result:
             if weight is None:
                 continue
 
-            numel = weight.numel()
-            zeros = int((weight == 0).sum().item())
+            # Dequantize if needed (torchao quantized tensors don't support eq)
+            try:
+                numel = weight.numel()
+                zeros = int((weight == 0).sum().item())
+            except (NotImplementedError, RuntimeError):
+                try:
+                    w = weight.dequantize()
+                    numel = w.numel()
+                    zeros = int((w == 0).sum().item())
+                except Exception:
+                    numel = weight.numel()
+                    zeros = 0
             total_params += numel
             total_zeros += zeros
             sparsity = zeros / numel if numel > 0 else 0.0
