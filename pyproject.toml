@@ -32,10 +32,9 @@ Homepage = "https://github.com/usman/lobotomizer"
 Repository = "https://github.com/usman/lobotomizer"
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0"]
-pruning = ["torch-pruning"]
-quantize = ["bitsandbytes"]
-all = ["lobotomizer[dev,pruning,quantize]"]
+dev = ["pytest>=7.0", "pytest-mock"]
+test-all = ["transformers", "openai-whisper", "ultralytics", "timm"]
+all = ["torch-pruning", "bitsandbytes", "torchprofile"]
 
 [project.scripts]
 lobotomize = "lobotomizer.cli:main"

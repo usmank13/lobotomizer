@@ -12,3 +12,5 @@ venv/
 .mypy_cache/
 *.so
 .tox/
+compressed_bert_quantized/
+compressed_*/

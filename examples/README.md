@@ -1,21 +1,24 @@
 # Lobotomizer Examples
 
-Runnable compression examples. Each script is self-contained — just `python examples/<script>.py`.
+Runnable compression examples. Each script is self-contained — install the required deps, then `python examples/<script>.py`.
 
-All examples gracefully fall back to dummy models when optional dependencies (transformers, whisper, ultralytics, timm) aren't installed, so you only need `torch` + `lobotomizer`.
+| Example | Model | Extra Deps | Use Case |
+|---------|-------|-----------|----------|
+| `resnet50_edge.py` | ResNet50 | None (torchvision) | Edge deployment |
+| `bert_quantize.py` | BERT-base | `transformers` | Faster NLP inference |
+| `whisper_compress.py` | Whisper small | `openai-whisper` | On-device transcription |
+| `yolo_edge.py` | YOLOv8n | `ultralytics` | Real-time edge detection |
+| `mobilevit_compress.py` | MobileViT-v2 | `timm` | Ultra-constrained devices |
 
-| Script | Description |
-|---|---|
-| `resnet50_edge.py` | ResNet50 pruned + quantized for edge deployment |
-| `bert_quantize.py` | BERT-base quantized for faster CPU inference |
-| `whisper_compress.py` | Whisper small compressed for on-device transcription |
-| `yolo_edge.py` | YOLOv8n compressed for real-time edge inference (Jetson Nano, etc.) |
-| `mobilevit_compress.py` | MobileViT further compressed — squeezing already-efficient models |
+## Install all example deps
+
+```bash
+pip install lobotomizer[test-all]
+```
 
 ## Running
 
 ```bash
-# From the repo root:
 python examples/resnet50_edge.py
 python examples/bert_quantize.py
 python examples/whisper_compress.py
