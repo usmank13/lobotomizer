@@ -22,8 +22,8 @@ def profile_model(
     - flops: estimated FLOPs (only if *input_shape* provided and a profiling
       backend is available; ``None`` otherwise)
     """
-    param_count = sum(p.numel() for p in model.parameters())
-    param_count_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    param_count = _count_params(model)
+    param_count_trainable = _count_params(model, trainable_only=True)
 
     # Size via serialized state_dict
     buf = io.BytesIO()
@@ -40,6 +40,55 @@ def profile_model(
         "size_mb": round(size_mb, 4),
         "flops": flops,
     }
+
+
+def _count_params(model: nn.Module, trainable_only: bool = False) -> int:
+    """Count parameters including those in quantized modules.
+
+    Quantized modules (e.g. dynamic quantized Linear) store weights in
+    packed params rather than exposing them via ``.parameters()``. We
+    detect these via ``_weight_bias()`` on leaf modules (modules whose
+    parent also has ``_weight_bias`` are skipped to avoid double-counting).
+    """
+    # First, try the normal .parameters() path
+    regular_count = sum(
+        p.numel() for p in model.parameters()
+        if not trainable_only or p.requires_grad
+    )
+
+    if regular_count > 0:
+        # Model has normal parameters — no quantized counting needed
+        return regular_count
+
+    # Model has no .parameters() — likely fully quantized.
+    # Walk leaf modules with _weight_bias() to count packed weights.
+    # Only count on modules that DON'T have a child with _weight_bias
+    # (avoids double-counting parent + _packed_params child).
+    modules_with_wb = {
+        id(m) for m in model.modules() if hasattr(m, "_weight_bias")
+    }
+
+    quantized_count = 0
+    for module in model.modules():
+        if not hasattr(module, "_weight_bias"):
+            continue
+        # Skip if any child also has _weight_bias (we'll count from the child)
+        has_child_wb = any(
+            id(child) in modules_with_wb
+            for child in module.children()
+        )
+        if has_child_wb:
+            continue
+
+        try:
+            w, b = module._weight_bias()
+            quantized_count += w.numel()
+            if b is not None:
+                quantized_count += b.numel()
+        except (AttributeError, RuntimeError):
+            pass
+
+    return quantized_count
 
 
 def _estimate_flops(
