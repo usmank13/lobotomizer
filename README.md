@@ -1,6 +1,6 @@
 # 🧠 Lobotomizer
 
-**Take any `nn.Module`. Make it smaller, faster, cheaper. Ship it.**
+**Take any `nn.Module`. ~~Lobotomize it.~~ Make it smaller, faster, cheaper.**
 
 Composable model compression for PyTorch. Prune, quantize, and profile models with a one-liner, an explicit pipeline, or the CLI.
 
