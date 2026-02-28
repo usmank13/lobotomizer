@@ -23,6 +23,7 @@ classifiers = [
 ]
 dependencies = [
     "torch>=2.0",
+    "torchao>=0.4",
     "numpy",
     "pyyaml",
 ]

@@ -9,13 +9,14 @@ from lobotomizer.core.result import Result
 from lobotomizer.stages.base import Stage
 from lobotomizer.stages.prune import Prune
 from lobotomizer.stages.quantize import Quantize
+from lobotomizer.stages.structured_prune import StructuredPrune
 
 if TYPE_CHECKING:
     import torch.nn as nn
     from torch.utils.data import DataLoader
 
 __version__ = "0.1.0"
-__all__ = ["Pipeline", "Prune", "Quantize", "Result", "Stage", "compress"]
+__all__ = ["Pipeline", "Prune", "Quantize", "Result", "Stage", "StructuredPrune", "compress"]
 
 
 def compress(
