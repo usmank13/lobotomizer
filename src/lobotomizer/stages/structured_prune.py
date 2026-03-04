@@ -27,12 +27,21 @@ class StructuredPrune(Stage):
     criterion : "l1" or "l2"
         Norm used to rank neurons for removal.  L1 = sum of absolute
         weights per output neuron; L2 = Euclidean norm.
+    protect_output : bool
+        If ``True`` (default), automatically excludes output layers —
+        Linear layers with no downstream consumer — from pruning.
+        This preserves the model's output interface (e.g. num_classes).
+    exclude_layers : set[str] | list[str] | None
+        Named layers to exclude from pruning entirely. Names should
+        match ``model.named_modules()`` keys (e.g. ``{"classifier", "fc"}``).
     """
 
     def __init__(
         self,
         sparsity: float = 0.3,
         criterion: Literal["l1", "l2"] = "l1",
+        protect_output: bool = True,
+        exclude_layers: set[str] | list[str] | None = None,
     ) -> None:
         if not 0.0 <= sparsity < 1.0:
             raise ValueError(f"Sparsity must be in [0, 1), got {sparsity}")
@@ -40,6 +49,8 @@ class StructuredPrune(Stage):
             raise ValueError(f"Criterion must be 'l1' or 'l2', got '{criterion}'")
         self._sparsity = sparsity
         self._criterion = criterion
+        self._protect_output = protect_output
+        self._exclude_layers: set[str] = set(exclude_layers) if exclude_layers else set()
 
     @property
     def name(self) -> str:
@@ -76,20 +87,54 @@ class StructuredPrune(Stage):
             logger.warning("No Linear layers found; returning model unchanged.")
             return model
 
-        pruned_outputs: dict[nn.Linear, torch.Tensor] = {}
-
-        # First pass: decide which output indices to keep per layer
-        for layer in _all_linears(model):
-            keep = self._compute_keep_indices(layer)
-            pruned_outputs[layer] = keep
+        # Build name → module mapping for exclusion
+        name_to_module: dict[nn.Module, str] = {
+            mod: name for name, mod in model.named_modules()
+        }
 
         # Build a mapping from layer to its downstream partner (if any)
         downstream: dict[nn.Linear, nn.Linear] = {}
         for src, dst in linear_pairs:
             downstream[src] = dst
 
+        # Determine which layers to skip
+        skip: set[nn.Linear] = set()
+
+        # User-specified exclusions
+        if self._exclude_layers:
+            named = dict(model.named_modules())
+            for layer_name in self._exclude_layers:
+                if layer_name in named and isinstance(named[layer_name], nn.Linear):
+                    skip.add(named[layer_name])
+                    logger.info("Excluding layer '%s' from pruning (user-specified).", layer_name)
+                elif layer_name not in named:
+                    logger.warning("Excluded layer '%s' not found in model.", layer_name)
+
+        # Auto-protect output layers (no downstream consumer)
+        if self._protect_output:
+            all_linears = _all_linears(model)
+            for layer in all_linears:
+                if layer not in downstream:
+                    layer_name = name_to_module.get(layer, "<unknown>")
+                    skip.add(layer)
+                    logger.info(
+                        "Protecting output layer '%s' from pruning (no downstream consumer).",
+                        layer_name,
+                    )
+
+        pruned_outputs: dict[nn.Linear, torch.Tensor] = {}
+
+        # First pass: decide which output indices to keep per layer
+        for layer in _all_linears(model):
+            if layer in skip:
+                continue
+            keep = self._compute_keep_indices(layer)
+            pruned_outputs[layer] = keep
+
         # Second pass: apply the pruning
         for layer in _all_linears(model):
+            if layer not in pruned_outputs:
+                continue
             keep = pruned_outputs[layer]
             _prune_output_dim(layer, keep)
 

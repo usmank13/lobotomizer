@@ -54,11 +54,12 @@ class SingleLinear(nn.Module):
 
 class TestStructuredPrune:
     def test_reduces_dimensions(self) -> None:
+        """Legacy test: protect_output=False to verify all layers get pruned."""
         model = TwoLayerMLP()
         assert model.fc1.out_features == 128
         assert model.fc2.in_features == 128
 
-        stage = StructuredPrune(sparsity=0.5, criterion="l1")
+        stage = StructuredPrune(sparsity=0.5, criterion="l1", protect_output=False)
         ctx = PipelineContext(original_model=model)
         pruned = stage.apply(model, ctx)
 
@@ -72,7 +73,7 @@ class TestStructuredPrune:
 
     def test_forward_still_works(self) -> None:
         model = TwoLayerMLP()
-        stage = StructuredPrune(sparsity=0.5)
+        stage = StructuredPrune(sparsity=0.5, protect_output=False)
         ctx = PipelineContext(original_model=model)
         pruned = stage.apply(model, ctx)
 
@@ -82,7 +83,7 @@ class TestStructuredPrune:
 
     def test_l2_criterion(self) -> None:
         model = TwoLayerMLP()
-        stage = StructuredPrune(sparsity=0.25, criterion="l2")
+        stage = StructuredPrune(sparsity=0.25, criterion="l2", protect_output=False)
         ctx = PipelineContext(original_model=model)
         pruned = stage.apply(model, ctx)
 
@@ -97,7 +98,7 @@ class TestStructuredPrune:
 
     def test_three_layer_propagation(self) -> None:
         model = ThreeLayerMLP()
-        stage = StructuredPrune(sparsity=0.5, criterion="l1")
+        stage = StructuredPrune(sparsity=0.5, criterion="l1", protect_output=False)
         ctx = PipelineContext(original_model=model)
         pruned = stage.apply(model, ctx)
 
@@ -116,7 +117,7 @@ class TestStructuredPrune:
 
     def test_single_layer_no_propagation_needed(self) -> None:
         model = SingleLinear()
-        stage = StructuredPrune(sparsity=0.5)
+        stage = StructuredPrune(sparsity=0.5, protect_output=False)
         ctx = PipelineContext(original_model=model)
         pruned = stage.apply(model, ctx)
 
@@ -129,7 +130,7 @@ class TestStructuredPrune:
 
     def test_bias_pruned_correctly(self) -> None:
         model = TwoLayerMLP()
-        stage = StructuredPrune(sparsity=0.5)
+        stage = StructuredPrune(sparsity=0.5, protect_output=False)
         ctx = PipelineContext(original_model=model)
         pruned = stage.apply(model, ctx)
 
@@ -141,7 +142,7 @@ class TestStructuredPrune:
     def test_fewer_params_after_pruning(self) -> None:
         model = TwoLayerMLP()
         params_before = sum(p.numel() for p in model.parameters())
-        stage = StructuredPrune(sparsity=0.5)
+        stage = StructuredPrune(sparsity=0.5, protect_output=False)
         ctx = PipelineContext(original_model=model)
         pruned = stage.apply(model, ctx)
         params_after = sum(p.numel() for p in pruned.parameters())
@@ -177,7 +178,7 @@ class TestStructuredPrune:
 
     def test_pipeline_integration(self) -> None:
         model = TwoLayerMLP()
-        result = compress(model, recipe=[StructuredPrune(sparsity=0.3)])
+        result = compress(model, recipe=[StructuredPrune(sparsity=0.3, protect_output=False)])
         assert result.model is not None
         x = torch.randn(1, 64)
         out = result.model(x)
@@ -189,10 +190,110 @@ class TestStructuredPrune:
             nn.ReLU(),
             nn.Linear(64, 10, bias=False),
         )
-        stage = StructuredPrune(sparsity=0.5)
+        stage = StructuredPrune(sparsity=0.5, protect_output=False)
         ctx = PipelineContext(original_model=model)
         pruned = stage.apply(model, ctx)
 
         x = torch.randn(2, 32)
         out = pruned(x)
         assert out.shape == (2, 5)
+
+    def test_protect_output_preserves_final_layer(self) -> None:
+        """Output layer dimensions should be preserved by default."""
+        model = nn.Sequential(
+            nn.Linear(32, 64),
+            nn.ReLU(),
+            nn.Linear(64, 10),
+        )
+        stage = StructuredPrune(sparsity=0.5, protect_output=True)
+        ctx = PipelineContext(original_model=model)
+        pruned = stage.apply(model, ctx)
+
+        x = torch.randn(2, 32)
+        out = pruned(x)
+        # Output dim must remain 10 (the model's interface)
+        assert out.shape == (2, 10)
+        # But the hidden layer should still be pruned
+        assert pruned[0].out_features == 32  # 64 * 0.5
+
+    def test_protect_output_is_default(self) -> None:
+        """protect_output=True is the default behavior."""
+        model = nn.Sequential(
+            nn.Linear(32, 64),
+            nn.ReLU(),
+            nn.Linear(64, 10),
+        )
+        stage = StructuredPrune(sparsity=0.5)
+        ctx = PipelineContext(original_model=model)
+        pruned = stage.apply(model, ctx)
+
+        x = torch.randn(2, 32)
+        out = pruned(x)
+        assert out.shape == (2, 10)
+
+    def test_protect_output_disabled(self) -> None:
+        """protect_output=False allows pruning the output layer."""
+        model = nn.Sequential(
+            nn.Linear(32, 64),
+            nn.ReLU(),
+            nn.Linear(64, 10),
+        )
+        stage = StructuredPrune(sparsity=0.5, protect_output=False)
+        ctx = PipelineContext(original_model=model)
+        pruned = stage.apply(model, ctx)
+
+        # Output layer should be pruned too
+        assert pruned[2].out_features == 5  # 10 * 0.5
+
+    def test_exclude_layers_by_name(self) -> None:
+        """User can exclude specific layers from pruning."""
+        model = nn.Sequential(
+            nn.Linear(32, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, 10),
+        )
+        # Exclude the middle layer
+        stage = StructuredPrune(
+            sparsity=0.5,
+            protect_output=False,
+            exclude_layers=["2"],
+        )
+        ctx = PipelineContext(original_model=model)
+        pruned = stage.apply(model, ctx)
+
+        # Layer "2" (second Linear) should keep its original out_features
+        assert pruned[2].out_features == 32
+        # First layer should be pruned
+        assert pruned[0].out_features == 32  # 64 * 0.5
+
+    def test_exclude_layers_nonexistent_warns(self) -> None:
+        """Excluding a nonexistent layer logs a warning but doesn't crash."""
+        model = nn.Sequential(nn.Linear(32, 64), nn.ReLU(), nn.Linear(64, 10))
+        stage = StructuredPrune(sparsity=0.5, exclude_layers=["nonexistent"])
+        ctx = PipelineContext(original_model=model)
+        # Should not raise
+        pruned = stage.apply(model, ctx)
+        assert pruned is model
+
+    def test_protect_output_three_layer(self) -> None:
+        """In a 3-layer chain, only the final output is protected."""
+        model = nn.Sequential(
+            nn.Linear(64, 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, 10),
+        )
+        stage = StructuredPrune(sparsity=0.5)
+        ctx = PipelineContext(original_model=model)
+        pruned = stage.apply(model, ctx)
+
+        x = torch.randn(2, 64)
+        out = pruned(x)
+        # Output preserved
+        assert out.shape == (2, 10)
+        # Hidden layers pruned
+        assert pruned[0].out_features == 64  # 128 * 0.5
+        assert pruned[2].out_features == 32  # 64 * 0.5
