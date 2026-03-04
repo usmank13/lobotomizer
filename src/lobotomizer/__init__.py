@@ -9,14 +9,27 @@ from lobotomizer.core.result import Result
 from lobotomizer.stages.base import Stage
 from lobotomizer.stages.prune import Prune
 from lobotomizer.stages.quantize import Quantize
+from lobotomizer.stages.distill import Distill
 from lobotomizer.stages.structured_prune import StructuredPrune
+from lobotomizer.core.registry import register_adapter, register_stage
 
 if TYPE_CHECKING:
     import torch.nn as nn
     from torch.utils.data import DataLoader
 
-__version__ = "0.1.0"
-__all__ = ["Pipeline", "Prune", "Quantize", "Result", "Stage", "StructuredPrune", "compress"]
+__version__ = "0.2.0"
+__all__ = [
+    "Distill",
+    "Pipeline",
+    "Prune",
+    "Quantize",
+    "Result",
+    "Stage",
+    "StructuredPrune",
+    "compress",
+    "register_adapter",
+    "register_stage",
+]
 
 
 def compress(
@@ -25,6 +38,7 @@ def compress(
     *,
     eval_fn: Callable | None = None,
     calibration_data: DataLoader | None = None,
+    training_data: DataLoader | None = None,
     device: str = "cpu",
     constraints: dict | None = None,
     input_shape: tuple | None = None,
@@ -39,6 +53,8 @@ def compress(
     recipe : str or list[Stage]
         Either a recipe name (e.g. "balanced"), a path to a YAML file,
         or a list of Stage instances.
+    training_data : DataLoader, optional
+        Training data for knowledge distillation stages.
     """
     if isinstance(recipe, (list, tuple)):
         pipeline = Pipeline(list(recipe))
@@ -49,6 +65,7 @@ def compress(
         model,
         eval_fn=eval_fn,
         calibration_data=calibration_data,
+        training_data=training_data,
         device=device,
         constraints=constraints,
         input_shape=input_shape,

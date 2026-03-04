@@ -7,23 +7,25 @@ from typing import Any
 import yaml
 
 from lobotomizer.core.pipeline import Pipeline
+from lobotomizer.core.registry import _STAGE_REGISTRY
 from lobotomizer.stages.base import Stage
-
-# Registry of stage type names to classes
-_STAGE_REGISTRY: dict[str, type[Stage]] = {}
 
 _RECIPES_DIR = pathlib.Path(__file__).parent.parent / "recipes"
 
 
 def _ensure_registry() -> None:
-    """Lazily populate the stage registry."""
+    """Lazily populate the canonical stage registry."""
     if _STAGE_REGISTRY:
         return
+    from lobotomizer.stages.distill import Distill
     from lobotomizer.stages.prune import Prune
     from lobotomizer.stages.quantize import Quantize
+    from lobotomizer.stages.structured_prune import StructuredPrune
 
     _STAGE_REGISTRY["prune"] = Prune
     _STAGE_REGISTRY["quantize"] = Quantize
+    _STAGE_REGISTRY["structured_prune"] = StructuredPrune
+    _STAGE_REGISTRY["distill"] = Distill
 
 
 def load_recipe(path: str | pathlib.Path) -> dict[str, Any]:
