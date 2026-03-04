@@ -29,6 +29,7 @@ class Pipeline:
         *,
         eval_fn: Callable | None = None,
         calibration_data: DataLoader | None = None,
+        training_data: DataLoader | None = None,
         device: str = "cpu",
         constraints: dict | None = None,
         input_shape: tuple | None = None,
@@ -53,6 +54,7 @@ class Pipeline:
             eval_fn=eval_fn,
             target_constraints=constraints,
             calibration_data=calibration_data,
+            training_data=training_data,
             device=device,
         )
 

@@ -89,6 +89,55 @@ Real results from compressing [Whisper-tiny](https://huggingface.co/openai/whisp
 | `dynamic` | Dynamic int8 quantization (Linear layers) |
 | `static` | Static int8 quantization (requires calibration data) |
 
+### Knowledge Distillation
+
+Train a compressed student model to mimic the original teacher:
+
+```python
+import lobotomizer as lob
+
+# Logit-based distillation (Hinton-style)
+result = lob.Pipeline([
+    lob.StructuredPrune(sparsity=0.3),
+    lob.Distill(method="logit", temperature=4.0, epochs=5, lr=1e-4),
+]).run(model, training_data=train_loader)
+
+# Feature matching — align intermediate representations
+result = lob.Pipeline([
+    lob.Distill(
+        method="feature",
+        feature_layers={"fc1": "fc1", "fc2": "fc2"},
+        epochs=10,
+    ),
+]).run(model, training_data=train_loader)
+
+# Both logit + feature distillation
+result = lob.Pipeline([
+    lob.Distill(method="both", alpha=0.7, temperature=4.0, epochs=10),
+]).run(model, training_data=train_loader)
+```
+
+| Parameter | Description |
+|---|---|
+| `method` | `"logit"`, `"feature"`, or `"both"` |
+| `temperature` | Softmax temperature for logit KD (default: 4.0) |
+| `alpha` | KD loss weight; `1-alpha` goes to task loss (default: 1.0) |
+| `feature_layers` | `dict[str,str]` mapping student→teacher layer names (auto-matched if `None`) |
+| `teacher` | `nn.Module`, file path, or `None` (uses original model) |
+| `epochs` | Training epochs (default: 5) |
+
+YAML recipe:
+
+```yaml
+stages:
+  - type: structured_prune
+    sparsity: 0.3
+  - type: distill
+    method: logit
+    temperature: 4.0
+    epochs: 5
+```
+
 ## Recipes
 
 Recipes are YAML files that define a sequence of stages:
@@ -141,7 +190,8 @@ Each script is self-contained and falls back to a dummy model if optional depend
 ## Roadmap
 
 - [x] **v0.1** — Prune, Quantize, Pipeline, profiler, recipes, CLI
-- [ ] **v0.2** — Knowledge distillation, ONNX export
+- [x] **v0.2** — Knowledge distillation (logit, feature, combined)
+- [ ] **v0.2.1** — ONNX export
 - [ ] **v0.3** — Structured pruning with fine-tuning, NAS integration
 - [ ] **v0.4** — Auto-compress (search over recipe space)
 - [ ] **v0.5** — Hardware-aware compression targets

@@ -18,6 +18,7 @@ class PipelineContext:
     target_constraints: dict = field(default_factory=dict)
     history: list[StageResult] = field(default_factory=list)
     calibration_data: DataLoader | None = None
+    training_data: DataLoader | None = None
     device: str = "cpu"
 
 
