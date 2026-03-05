@@ -2,7 +2,9 @@
 
 **Take any `nn.Module`. ~~Lobotomize it.~~ Make it smaller, faster, cheaper.**
 
-Composable model compression for PyTorch. Prune, quantize, and profile models with a one-liner, an explicit pipeline, or the CLI.
+Composable model compression for PyTorch. Run pipelines to use compression techniques like quantization, pruning, knowledge distillation, and more with a one-liner, an explicit pipeline, or the CLI.
+
+Over time will try to serve as an easy-to-use collection of popular techniques to help with R&D in the field.
 
 ## Installation
 
@@ -185,18 +187,21 @@ See [`examples/`](examples/) for complete, runnable scripts:
 | [`yolo_edge.py`](examples/yolo_edge.py) | YOLOv8n compressed for real-time edge inference |
 | [`mobilevit_compress.py`](examples/mobilevit_compress.py) | MobileViT further compressed for ultra-constrained devices |
 
-Each script is self-contained and falls back to a dummy model if optional dependencies aren't installed.
+Each script is self-contained and falls back to a dummy model if optional dependencies aren't installed. Note: not all of these are fully tested yet.
 
 ## Roadmap
 
 - [x] **v0.1** — Prune, Quantize, Pipeline, profiler, recipes, CLI
-- [x] **v0.2** — Knowledge distillation (logit, feature, combined)
-- [ ] **v0.2.1** — ONNX export
-- [ ] **v0.3** — Structured pruning with fine-tuning, NAS integration
-- [ ] **v0.4** — Auto-compress (search over recipe space)
-- [ ] **v0.5** — Hardware-aware compression targets
+- [x] **v0.2** — Knowledge distillation (logit, feature)
+- [ ] **v0.3** — Sparsity and low-rank techniques.
+- [ ] **v0.4** — Hardware support (ONNX, profliing, and stuff like that)
+- [ ] **v0.5** — Search & automation (sweeps, finding lobotomization pipelines to hit given targets)
+
+Over time: progressively support and wrap more techniques, layer types, tools, etc. 
 
 ## Contributing
+
+Contributions welcome! Let's grow the lobotomization movement.
 
 1. Fork & clone
 2. `pip install -e ".[dev]"`

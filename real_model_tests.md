@@ -2,20 +2,12 @@
 
 **Date:** 2026-02-28
 
-**Models tested:** 3
-
-**Total tests:** 12
-
-**Passed:** 11 | **Errors:** 0 | **Forward failures:** 1
+**Models tested:** 2
 
 ## Summary
 
 | Model | Pipeline | Orig Size (MB) | Comp Size (MB) | Ratio | Params Before | Params After | Forward OK | Time (s) |
 |-------|----------|---------------|---------------|-------|--------------|-------------|-----------|----------|
-| ResNet-50 | Prune 30% (unstructured L1) | 97.79 | 97.7908 | 1.0x | 25,557,032 | 25,557,032 | ✅ | 1.3 |
-| ResNet-50 | Quantize (dynamic int8) | 97.79 | 91.9367 | 1.06x | 25,557,032 | 25,557,032 | ✅ | 0.4 |
-| ResNet-50 | Prune 30% + Quantize | 97.79 | 91.9367 | 1.06x | 25,557,032 | 25,557,032 | ✅ | 1.5 |
-| ResNet-50 | Structured Prune 30% | 97.79 | 95.4459 | 1.02x | 25,557,032 | 24,942,332 | ✅ | 0.4 |
 | Whisper-tiny | Prune 30% (unstructured L1) | 144.11 | 144.1051 | 1.0x | 37,760,640 | 37,760,640 | ✅ | 1.7 |
 | Whisper-tiny | Quantize (dynamic int8) | 144.11 | 116.2132 | 1.24x | 37,760,640 | 57,676,800 | ✅ | 0.6 |
 | Whisper-tiny | Prune 30% + Quantize | 144.11 | 116.2132 | 1.24x | 37,760,640 | 57,676,800 | ✅ | 2.0 |
@@ -26,54 +18,6 @@
 | MobileViT-v2-050 | Structured Prune 30% | 5.35 | 5.0592 | 1.06x | 1,370,593 | 1,293,493 | ✅ | 0.1 |
 
 ## Detailed Results
-
-### ResNet-50 — Prune 30% (unstructured L1)
-
-```
-┌───────────────────────┬──────────┬──────────┬───────┐
-│ Metric                │ Before   │ After    │ Δ     │
-├───────────────────────┼──────────┼──────────┼───────┤
-│ param_count           │ 25557032 │ 25557032 │ +0.0% │
-│ param_count_trainable │ 25557032 │ 25557032 │ +0.0% │
-│ size_mb               │ 97.7908  │ 97.7908  │ +0.0% │
-└───────────────────────┴──────────┴──────────┴───────┘
-```
-
-### ResNet-50 — Quantize (dynamic int8)
-
-```
-┌───────────────────────┬──────────┬──────────┬───────┐
-│ Metric                │ Before   │ After    │ Δ     │
-├───────────────────────┼──────────┼──────────┼───────┤
-│ param_count           │ 25557032 │ 25557032 │ +0.0% │
-│ param_count_trainable │ 25557032 │ 23509032 │ -8.0% │
-│ size_mb               │ 97.7908  │ 91.9367  │ -6.0% │
-└───────────────────────┴──────────┴──────────┴───────┘
-```
-
-### ResNet-50 — Prune 30% + Quantize
-
-```
-┌───────────────────────┬──────────┬──────────┬───────┐
-│ Metric                │ Before   │ After    │ Δ     │
-├───────────────────────┼──────────┼──────────┼───────┤
-│ param_count           │ 25557032 │ 25557032 │ +0.0% │
-│ param_count_trainable │ 25557032 │ 23509032 │ -8.0% │
-│ size_mb               │ 97.7908  │ 91.9367  │ -6.0% │
-└───────────────────────┴──────────┴──────────┴───────┘
-```
-
-### ResNet-50 — Structured Prune 30%
-
-```
-┌───────────────────────┬──────────┬──────────┬───────┐
-│ Metric                │ Before   │ After    │ Δ     │
-├───────────────────────┼──────────┼──────────┼───────┤
-│ param_count           │ 25557032 │ 24942332 │ -2.4% │
-│ param_count_trainable │ 25557032 │ 24942332 │ -2.4% │
-│ size_mb               │ 97.7908  │ 95.4459  │ -2.4% │
-└───────────────────────┴──────────┴──────────┴───────┘
-```
 
 ### Whisper-tiny — Prune 30% (unstructured L1)
 
@@ -123,7 +67,7 @@
 └───────────────────────┴──────────┴──────────┴────────┘
 ```
 
-**Forward pass failed:** `mat1 and mat2 shapes cannot be multiplied (1500x384 and 269x269)`
+**Forward pass failed:** transformer architectures will need better handling to make this work.
 
 ### MobileViT-v2-050 — Prune 30% (unstructured L1)
 
