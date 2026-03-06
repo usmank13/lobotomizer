@@ -10,12 +10,23 @@ Over time will try to serve as an easy-to-use collection of popular techniques t
 
 ```bash
 pip install lobotomizer
+```
 
-# With optional extras
+Optional extras:
+
+```bash
 pip install lobotomizer[all]       # everything
 pip install lobotomizer[dev]       # pytest
 pip install lobotomizer[pruning]   # torch-pruning
 pip install lobotomizer[quantize]  # bitsandbytes
+```
+
+Or install from source:
+
+```bash
+git clone https://github.com/usmank13/lobotomizer.git
+cd lobotomizer
+pip install -e ".[dev]"
 ```
 
 ## Quick Start
@@ -191,11 +202,11 @@ Each script is self-contained and falls back to a dummy model if optional depend
 
 ## Roadmap
 
-- [x] **v0.1** — Prune, Quantize, Pipeline, profiler, recipes, CLI
-- [x] **v0.2** — Knowledge distillation (logit, feature)
-- [ ] **v0.3** — Sparsity and low-rank techniques.
-- [ ] **v0.4** — Hardware support (ONNX, profliing, and stuff like that)
-- [ ] **v0.5** — Search & automation (sweeps, finding lobotomization pipelines to hit given targets)
+- [x] Prune, Quantize, Pipeline, profiler, recipes, CLI
+- [x] Knowledge distillation (logit, feature)
+- [ ] Sparsity and low-rank techniques
+- [ ] Hardware support (ONNX, profiling, and stuff like that)
+- [ ] Search & automation (sweeps, finding lobotomization pipelines to hit given targets)
 
 Over time: progressively support and wrap more techniques, layer types, tools, etc. 
 
