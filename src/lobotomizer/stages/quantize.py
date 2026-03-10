@@ -305,8 +305,15 @@ class AWQMethod(QuantMethod):
             elif isinstance(batch, (list, tuple)):
                 calib_data.extend(batch)
 
+        # autoawq.quantize() expects a tokenizer object, not a string.
+        # Try to load it; fall back to the string if AutoTokenizer isn't available.
         tokenizer_name = self.kwargs.get("tokenizer", model.name_or_path)
-        awq_model.quantize(calib_data, quant_config=quant_config, tokenizer=tokenizer_name)
+        try:
+            from transformers import AutoTokenizer
+            tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+        except Exception:
+            tokenizer = tokenizer_name  # best-effort fallback
+        awq_model.quantize(calib_data, quant_config=quant_config, tokenizer=tokenizer)
         return awq_model.model
 
     def validate(self, model: nn.Module) -> list[str]:
@@ -337,8 +344,6 @@ _METHOD_ALIASES = {
     "static": "static_int8",
 }
 
-# Backward-compatible dtype set
-_SUPPORTED_DTYPES = {"qint8", "int4", "auto"}
 
 
 # ---------------------------------------------------------------------------
