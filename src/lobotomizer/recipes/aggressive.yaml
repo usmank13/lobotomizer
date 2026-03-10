@@ -1,0 +1,8 @@
+name: aggressive
+description: "Heavy pruning + INT4 weight-only quantization for maximum compression"
+stages:
+  - type: prune
+    method: l1_unstructured
+    sparsity: 0.5
+  - type: quantize
+    method: int4_weight_only
