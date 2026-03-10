@@ -8,7 +8,7 @@ from lobotomizer.core.recipe import build_pipeline_from_recipe
 from lobotomizer.core.result import Result
 from lobotomizer.stages.base import Stage
 from lobotomizer.stages.prune import Prune
-from lobotomizer.stages.quantize import Quantize
+from lobotomizer.stages.quantize import Quantize, available_methods as available_quant_methods
 from lobotomizer.stages.distill import Distill
 from lobotomizer.stages.structured_prune import StructuredPrune
 from lobotomizer.core.registry import register_adapter, register_stage
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     import torch.nn as nn
     from torch.utils.data import DataLoader
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __all__ = [
     "Distill",
     "Pipeline",

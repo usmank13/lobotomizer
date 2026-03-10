@@ -97,10 +97,26 @@ Real results from compressing [Whisper-tiny](https://huggingface.co/openai/whisp
 
 ### Quantization
 
-| Method | Description |
-|---|---|
-| `dynamic` | Dynamic int8 quantization (Linear layers) |
-| `static` | Static int8 quantization (requires calibration data) |
+| Method | Description | Extra Deps |
+|---|---|---|
+| `dynamic` / `dynamic_int8` | Dynamic int8 quantization (Linear layers) | — |
+| `static` / `static_int8` | Static int8 quantization (requires calibration data) | — |
+| `int4_weight_only` | INT4 weight-only quantization via torchao | — |
+| `gptq` | GPTQ quantization (HuggingFace models) | `auto-gptq` |
+| `awq` | AWQ quantization (HuggingFace models) | `autoawq` |
+
+Methods with optional dependencies will raise a clear `ImportError` if the dep is missing.
+
+```python
+# INT4 weight-only (no extra deps needed)
+lob.Quantize(method="int4_weight_only")
+
+# GPTQ with custom settings
+lob.Quantize(method="gptq", bits=4, group_size=128)
+
+# AWQ
+lob.Quantize(method="awq", w_bit=4, q_group_size=128)
+```
 
 ### Knowledge Distillation
 
@@ -167,7 +183,7 @@ stages:
     dtype: qint8
 ```
 
-Built-in recipes: `balanced`
+Built-in recipes: `balanced`, `aggressive`
 
 Use custom recipes: `lob.compress(model, recipe="path/to/recipe.yaml")`
 
