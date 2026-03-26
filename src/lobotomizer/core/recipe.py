@@ -18,6 +18,7 @@ def _ensure_registry() -> None:
     if _STAGE_REGISTRY:
         return
     from lobotomizer.stages.distill import Distill
+    from lobotomizer.stages.low_rank import LowRank
     from lobotomizer.stages.prune import Prune
     from lobotomizer.stages.quantize import Quantize
     from lobotomizer.stages.structured_prune import StructuredPrune
@@ -26,6 +27,7 @@ def _ensure_registry() -> None:
     _STAGE_REGISTRY["quantize"] = Quantize
     _STAGE_REGISTRY["structured_prune"] = StructuredPrune
     _STAGE_REGISTRY["distill"] = Distill
+    _STAGE_REGISTRY["low_rank"] = LowRank
 
 
 def load_recipe(path: str | pathlib.Path) -> dict[str, Any]:
