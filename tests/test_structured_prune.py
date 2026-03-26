@@ -453,3 +453,38 @@ class TestConv2dStructuredPrune:
         x = torch.randn(1, 3, 8, 8)
         out = result.model(x)
         assert out.shape == (1, 10)
+
+    def test_grouped_conv_skipped(self) -> None:
+        """Grouped Conv2d (groups > 1) should be skipped, not pruned."""
+        model = nn.Sequential(
+            nn.Conv2d(8, 8, 3, padding=1, groups=4),  # grouped
+            nn.ReLU(),
+            nn.Conv2d(8, 16, 3, padding=1),  # standard
+        )
+        stage = StructuredPrune(sparsity=0.5, protect_output=False)
+        ctx = PipelineContext(original_model=model)
+        pruned = stage.apply(model, ctx)
+
+        # Grouped conv should be untouched
+        assert pruned[0].out_channels == 8
+        assert pruned[0].groups == 4
+        # Standard conv should still be prunable
+        x = torch.randn(1, 8, 4, 4)
+        out = pruned(x)
+        assert out.shape[1] == 8  # 16 * 0.5
+
+    def test_depthwise_conv_skipped(self) -> None:
+        """Depthwise separable Conv2d should be skipped."""
+        model = nn.Sequential(
+            nn.Conv2d(16, 16, 3, padding=1, groups=16),  # depthwise
+            nn.Conv2d(16, 32, 1),  # pointwise
+        )
+        stage = StructuredPrune(sparsity=0.5, protect_output=False)
+        ctx = PipelineContext(original_model=model)
+        pruned = stage.apply(model, ctx)
+
+        # Depthwise untouched
+        assert pruned[0].out_channels == 16
+        assert pruned[0].groups == 16
+        # Pointwise pruned
+        assert pruned[1].out_channels == 16  # 32 * 0.5

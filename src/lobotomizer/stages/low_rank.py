@@ -110,6 +110,12 @@ class LowRank(Stage):
                     )
 
             elif isinstance(module, nn.Conv2d):
+                if module.groups > 1:
+                    logger.info(
+                        "Skipping grouped Conv2d '%s' (groups=%d) — not supported.",
+                        name, module.groups,
+                    )
+                    continue
                 replacement = self._decompose_conv2d(module)
                 if replacement is not None:
                     replacements.append((name, module, replacement))
