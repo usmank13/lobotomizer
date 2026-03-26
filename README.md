@@ -92,8 +92,8 @@ Real results from compressing [Whisper-tiny](https://huggingface.co/openai/whisp
 |---|---|
 | `l1_unstructured` | Remove weights with smallest L1 magnitude |
 | `random_unstructured` | Remove random weights |
-| `l1_structured` | Remove entire channels by L1 norm (Conv2d) |
-| `random_structured` | Remove random channels (Conv2d) |
+| `l1_structured` | Remove entire channels by L1 norm (Conv2d) — mask-based |
+| `random_structured` | Remove random channels (Conv2d) — mask-based |
 
 ### Quantization
 
@@ -186,6 +186,35 @@ stages:
 Built-in recipes: `balanced`, `aggressive`
 
 Use custom recipes: `lob.compress(model, recipe="path/to/recipe.yaml")`
+
+### Structured Pruning (Physical)
+
+`StructuredPrune` physically removes neurons and filters, producing smaller architectures with real speedups — no sparse hardware needed.
+
+| Layer Type | What's Removed | Propagation |
+|---|---|---|
+| `nn.Linear` | Output neurons (rows) | Downstream Linear input columns |
+| `nn.Conv2d` | Output filters (dim 0) | Downstream Conv2d input channels + BatchNorm2d |
+
+```python
+import lobotomizer as lob
+
+# Prune 30% of neurons/filters from all layers
+result = lob.Pipeline([
+    lob.StructuredPrune(sparsity=0.3, criterion="l1"),
+]).run(model)
+
+# Exclude specific layers, protect output interface
+result = lob.Pipeline([
+    lob.StructuredPrune(
+        sparsity=0.4,
+        protect_output=True,        # default: don't prune output layers
+        exclude_layers={"layer4"},   # skip specific layers
+    ),
+]).run(model)
+```
+
+**Note:** Conv2d chains are only detected within `nn.Sequential` containers to avoid breaking skip/residual connections. Models with residual blocks (ResNet, etc.) will have their conv layers automatically protected.
 
 ## How It Works
 

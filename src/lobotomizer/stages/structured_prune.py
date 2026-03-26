@@ -1,9 +1,8 @@
-"""Structured pruning that physically removes rows/columns from Linear layers."""
+"""Structured pruning that physically removes rows/columns from Linear and Conv2d layers."""
 from __future__ import annotations
 
 import logging
-from collections import OrderedDict
-from typing import Literal
+from typing import Literal, Union
 
 import torch
 import torch.nn as nn
@@ -12,28 +11,40 @@ from lobotomizer.stages.base import PipelineContext, Stage
 
 logger = logging.getLogger(__name__)
 
+# Layer types that structured pruning can handle
+_PRUNABLE = (nn.Linear, nn.Conv2d)
+PrunableLayer = Union[nn.Linear, nn.Conv2d]
+
+# Layers that don't break a chain between prunable layers
+_PASSTHROUGH_TYPES = (
+    nn.ReLU, nn.GELU, nn.SiLU, nn.Tanh, nn.Sigmoid,
+    nn.Dropout, nn.BatchNorm1d, nn.BatchNorm2d, nn.LayerNorm,
+    nn.Identity, nn.MaxPool2d, nn.AvgPool2d, nn.AdaptiveAvgPool2d,
+)
+
 
 class StructuredPrune(Stage):
-    """Remove entire neurons (rows/columns) from Linear layers.
+    """Remove entire neurons/filters from Linear and Conv2d layers.
 
     Unlike unstructured pruning which just zeros weights, this stage
     physically shrinks weight matrices, changing the architecture and
     producing real speedups.
 
+    For Conv2d layers, this removes entire output filters (along dim 0
+    of the weight tensor) and propagates the change to downstream layers'
+    input channels and any intervening BatchNorm2d layers.
+
     Parameters
     ----------
     sparsity : float
-        Fraction of output neurons to remove per layer (0.0 to 1.0).
+        Fraction of output neurons/filters to remove per layer (0.0 to 1.0).
     criterion : "l1" or "l2"
-        Norm used to rank neurons for removal.  L1 = sum of absolute
-        weights per output neuron; L2 = Euclidean norm.
+        Norm used to rank neurons/filters for removal.
     protect_output : bool
         If ``True`` (default), automatically excludes output layers —
-        Linear layers with no downstream consumer — from pruning.
-        This preserves the model's output interface (e.g. num_classes).
+        layers with no downstream consumer — from pruning.
     exclude_layers : set[str] | list[str] | None
-        Named layers to exclude from pruning entirely. Names should
-        match ``model.named_modules()`` keys (e.g. ``{"classifier", "fc"}``).
+        Named layers to exclude from pruning entirely.
     """
 
     def __init__(
@@ -62,15 +73,15 @@ class StructuredPrune(Stage):
 
     def validate(self, model: nn.Module) -> list[str]:
         warnings: list[str] = []
-        linears = [m for m in model.modules() if isinstance(m, nn.Linear)]
-        if not linears:
-            warnings.append("Model has no Linear layers for structured pruning.")
+        has_prunable = any(isinstance(m, _PRUNABLE) for m in model.modules())
+        if not has_prunable:
+            warnings.append("Model has no Linear or Conv2d layers for structured pruning.")
         return warnings
 
     def estimate_impact(self, model: nn.Module) -> dict:
         total_params = sum(p.numel() for p in model.parameters())
         prunable = sum(
-            p.numel() for m in model.modules() if isinstance(m, nn.Linear)
+            p.numel() for m in model.modules() if isinstance(m, _PRUNABLE)
             for p in m.parameters()
         )
         estimated_removed = int(prunable * self._sparsity)
@@ -82,29 +93,29 @@ class StructuredPrune(Stage):
         }
 
     def apply(self, model: nn.Module, context: PipelineContext) -> nn.Module:
-        linear_pairs = _find_linear_chains(model)
-        if not linear_pairs and not any(isinstance(m, nn.Linear) for m in model.modules()):
-            logger.warning("No Linear layers found; returning model unchanged.")
+        chains = _find_prunable_chains(model)
+        if not chains and not any(isinstance(m, _PRUNABLE) for m in model.modules()):
+            logger.warning("No prunable layers found; returning model unchanged.")
             return model
 
-        # Build name → module mapping for exclusion
-        name_to_module: dict[nn.Module, str] = {
+        # Build module → name mapping
+        module_to_name: dict[nn.Module, str] = {
             mod: name for name, mod in model.named_modules()
         }
 
-        # Build a mapping from layer to its downstream partner (if any)
-        downstream: dict[nn.Linear, nn.Linear] = {}
-        for src, dst in linear_pairs:
-            downstream[src] = dst
+        # downstream: layer → (next_prunable_layer, [intermediate_batchnorms])
+        downstream: dict[PrunableLayer, tuple[PrunableLayer, list[nn.Module]]] = {}
+        for src, dst, intermediates in chains:
+            downstream[src] = (dst, intermediates)
 
         # Determine which layers to skip
-        skip: set[nn.Linear] = set()
+        skip: set[PrunableLayer] = set()
 
         # User-specified exclusions
         if self._exclude_layers:
             named = dict(model.named_modules())
             for layer_name in self._exclude_layers:
-                if layer_name in named and isinstance(named[layer_name], nn.Linear):
+                if layer_name in named and isinstance(named[layer_name], _PRUNABLE):
                     skip.add(named[layer_name])
                     logger.info("Excluding layer '%s' from pruning (user-specified).", layer_name)
                 elif layer_name not in named:
@@ -112,35 +123,37 @@ class StructuredPrune(Stage):
 
         # Auto-protect output layers (no downstream consumer)
         if self._protect_output:
-            all_linears = _all_linears(model)
-            for layer in all_linears:
+            all_prunable = _all_prunable(model)
+            for layer in all_prunable:
                 if layer not in downstream:
-                    layer_name = name_to_module.get(layer, "<unknown>")
+                    layer_name = module_to_name.get(layer, "<unknown>")
                     skip.add(layer)
                     logger.info(
                         "Protecting output layer '%s' from pruning (no downstream consumer).",
                         layer_name,
                     )
 
-        pruned_outputs: dict[nn.Linear, torch.Tensor] = {}
-
-        # First pass: decide which output indices to keep per layer
-        for layer in _all_linears(model):
+        # First pass: compute keep indices
+        pruned_outputs: dict[PrunableLayer, torch.Tensor] = {}
+        for layer in _all_prunable(model):
             if layer in skip:
                 continue
             keep = self._compute_keep_indices(layer)
             pruned_outputs[layer] = keep
 
-        # Second pass: apply the pruning
-        for layer in _all_linears(model):
+        # Second pass: apply pruning
+        for layer in _all_prunable(model):
             if layer not in pruned_outputs:
                 continue
             keep = pruned_outputs[layer]
             _prune_output_dim(layer, keep)
 
-            # Propagate to downstream layer's input dimension
+            # Propagate to downstream layer's input dimension + intermediates
             if layer in downstream:
-                _prune_input_dim(downstream[layer], keep)
+                next_layer, intermediates = downstream[layer]
+                for inter in intermediates:
+                    _prune_batchnorm(inter, keep)
+                _prune_input_dim(next_layer, keep)
 
         return model
 
@@ -148,9 +161,9 @@ class StructuredPrune(Stage):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _compute_keep_indices(self, layer: nn.Linear) -> torch.Tensor:
-        """Return sorted indices of output neurons to keep."""
-        weight = layer.weight.data  # (out_features, in_features)
+    def _compute_keep_indices(self, layer: PrunableLayer) -> torch.Tensor:
+        """Return sorted indices of output neurons/filters to keep."""
+        weight = layer.weight.data
         n_out = weight.shape[0]
         n_remove = max(1, int(n_out * self._sparsity))
         n_keep = n_out - n_remove
@@ -158,86 +171,144 @@ class StructuredPrune(Stage):
             n_keep = 1
             n_remove = n_out - 1
 
-        if self._criterion == "l1":
-            scores = weight.abs().sum(dim=1)
-        else:  # l2
-            scores = weight.norm(p=2, dim=1)
+        if isinstance(layer, nn.Linear):
+            # (out_features, in_features)
+            if self._criterion == "l1":
+                scores = weight.abs().sum(dim=1)
+            else:
+                scores = weight.norm(p=2, dim=1)
+        else:
+            # Conv2d: (out_channels, in_channels, kH, kW) → flatten per filter
+            flat = weight.view(n_out, -1)
+            if self._criterion == "l1":
+                scores = flat.abs().sum(dim=1)
+            else:
+                scores = flat.norm(p=2, dim=1)
 
         _, indices = scores.sort(descending=True)
         keep = indices[:n_keep].sort().values
         return keep
 
 
-def _prune_output_dim(layer: nn.Linear, keep: torch.Tensor) -> None:
-    """Remove rows from weight (and bias) — shrinks out_features."""
+# ======================================================================
+# Pruning operations
+# ======================================================================
+
+def _prune_output_dim(layer: PrunableLayer, keep: torch.Tensor) -> None:
+    """Remove output neurons/filters — shrinks out_features/out_channels."""
     layer.weight = nn.Parameter(layer.weight.data[keep])
     if layer.bias is not None:
         layer.bias = nn.Parameter(layer.bias.data[keep])
-    layer.out_features = layer.weight.shape[0]
+
+    if isinstance(layer, nn.Linear):
+        layer.out_features = layer.weight.shape[0]
+    else:
+        layer.out_channels = layer.weight.shape[0]
 
 
-def _prune_input_dim(layer: nn.Linear, keep: torch.Tensor) -> None:
-    """Remove columns from weight — shrinks in_features."""
-    layer.weight = nn.Parameter(layer.weight.data[:, keep])
-    layer.in_features = layer.weight.shape[1]
+def _prune_input_dim(layer: PrunableLayer, keep: torch.Tensor) -> None:
+    """Remove input neurons/channels — shrinks in_features/in_channels."""
+    if isinstance(layer, nn.Linear):
+        layer.weight = nn.Parameter(layer.weight.data[:, keep])
+        layer.in_features = layer.weight.shape[1]
+    else:
+        # Conv2d: dim 1 is in_channels
+        layer.weight = nn.Parameter(layer.weight.data[:, keep])
+        layer.in_channels = layer.weight.shape[1]
 
 
-def _all_linears(model: nn.Module) -> list[nn.Linear]:
-    """Return all Linear layers in forward order."""
-    return [m for m in model.modules() if isinstance(m, nn.Linear)]
+def _prune_batchnorm(bn: nn.Module, keep: torch.Tensor) -> None:
+    """Shrink a BatchNorm layer to match pruned channel count."""
+    if not isinstance(bn, (nn.BatchNorm1d, nn.BatchNorm2d)):
+        return
+    bn.num_features = keep.shape[0]
+    if bn.weight is not None:
+        bn.weight = nn.Parameter(bn.weight.data[keep])
+    if bn.bias is not None:
+        bn.bias = nn.Parameter(bn.bias.data[keep])
+    if bn.running_mean is not None:
+        bn.running_mean = bn.running_mean[keep]
+    if bn.running_var is not None:
+        bn.running_var = bn.running_var[keep]
 
 
-def _find_linear_chains(model: nn.Module) -> list[tuple[nn.Linear, nn.Linear]]:
-    """Find consecutive Linear layer pairs (possibly separated by non-parametric layers).
+# ======================================================================
+# Chain finding
+# ======================================================================
 
-    Walks named children of Sequential-like containers and pairs up
-    Linear layers that feed into each other (with only activation /
-    dropout / normalization in between).
+def _all_prunable(model: nn.Module) -> list[PrunableLayer]:
+    """Return all prunable layers in forward order."""
+    return [m for m in model.modules() if isinstance(m, _PRUNABLE)]
+
+
+def _find_prunable_chains(
+    model: nn.Module,
+) -> list[tuple[PrunableLayer, PrunableLayer, list[nn.Module]]]:
+    """Find consecutive prunable layer pairs, possibly separated by passthrough layers.
+
+    Returns list of (source, destination, intermediates) tuples where
+    intermediates are BatchNorm layers between src and dst that need
+    to be adjusted when src is pruned.
     """
-    pairs: list[tuple[nn.Linear, nn.Linear]] = []
-
-    # For Sequential-style models, walk children in order
-    _find_pairs_recursive(model, pairs)
-    return pairs
+    chains: list[tuple[PrunableLayer, PrunableLayer, list[nn.Module]]] = []
+    _find_chains_recursive(model, chains)
+    return chains
 
 
-_PASSTHROUGH_TYPES = (
-    nn.ReLU, nn.GELU, nn.SiLU, nn.Tanh, nn.Sigmoid,
-    nn.Dropout, nn.BatchNorm1d, nn.LayerNorm, nn.Identity,
-)
-
-
-def _find_pairs_recursive(
+def _find_chains_recursive(
     module: nn.Module,
-    pairs: list[tuple[nn.Linear, nn.Linear]],
+    chains: list[tuple[PrunableLayer, PrunableLayer, list[nn.Module]]],
 ) -> None:
-    """Recursively find Linear→Linear pairs in Sequential-like containers."""
+    """Recursively find prunable→prunable pairs in Sequential-like containers.
+
+    Only forms chains within ``nn.Sequential`` containers to avoid breaking
+    skip/residual connections in modules like ResNet BasicBlock.
+    """
     children = list(module.children())
     if not children:
         return
 
-    # Collect linear layers at this level (skipping passthrough layers)
-    linears_at_level: list[nn.Linear] = []
+    is_sequential = isinstance(module, nn.Sequential)
+
+    # Track current chain of prunable layers and intermediates at this level
+    prunable_at_level: list[PrunableLayer] = []
+    intermediates_at_level: list[list[nn.Module]] = []
+    current_intermediates: list[nn.Module] = []
+
+    # In non-Sequential modules, only chain Linear layers (Conv2d may have
+    # skip connections we can't detect from structure alone). Sequential
+    # containers are safe to chain all prunable types.
+    allow_conv = is_sequential
+
     for child in children:
-        if isinstance(child, nn.Linear):
-            linears_at_level.append(child)
+        is_chainable = isinstance(child, _PRUNABLE) and (
+            allow_conv or isinstance(child, nn.Linear)
+        )
+        if is_chainable:
+            prunable_at_level.append(child)
+            intermediates_at_level.append(current_intermediates)
+            current_intermediates = []
         elif isinstance(child, _PASSTHROUGH_TYPES):
-            continue  # skip, doesn't break the chain
+            if isinstance(child, (nn.BatchNorm1d, nn.BatchNorm2d)):
+                current_intermediates.append(child)
         else:
-            # Non-passthrough, non-linear: break the chain and recurse
-            if len(linears_at_level) >= 2:
-                for i in range(len(linears_at_level) - 1):
-                    pairs.append((linears_at_level[i], linears_at_level[i + 1]))
-            linears_at_level = []
-            _find_pairs_recursive(child, pairs)
+            # Non-passthrough: flush chain and recurse
+            _flush_chain(prunable_at_level, intermediates_at_level, chains)
+            prunable_at_level = []
+            intermediates_at_level = []
+            current_intermediates = []
+            _find_chains_recursive(child, chains)
 
-    # Final flush
-    if len(linears_at_level) >= 2:
-        for i in range(len(linears_at_level) - 1):
-            pairs.append((linears_at_level[i], linears_at_level[i + 1]))
+    _flush_chain(prunable_at_level, intermediates_at_level, chains)
 
-    # Also recurse into all children that aren't simple layers
-    for child in children:
-        if not isinstance(child, (nn.Linear, *_PASSTHROUGH_TYPES)):
-            pass  # already recursed above
-        # Don't recurse into Linear or passthrough
+
+def _flush_chain(
+    prunable: list[PrunableLayer],
+    intermediates: list[list[nn.Module]],
+    chains: list[tuple[PrunableLayer, PrunableLayer, list[nn.Module]]],
+) -> None:
+    """Convert a sequence of prunable layers into pairs."""
+    if len(prunable) >= 2:
+        for i in range(len(prunable) - 1):
+            # intermediates[i+1] are the BN layers between prunable[i] and prunable[i+1]
+            chains.append((prunable[i], prunable[i + 1], intermediates[i + 1]))
