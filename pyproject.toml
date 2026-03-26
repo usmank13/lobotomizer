@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lobotomizer"
-version = "0.2.0"
+version = "0.3.0"
 description = "Composable model compression for PyTorch — prune, quantize, and ship."
 readme = "README.md"
 license = "MIT"

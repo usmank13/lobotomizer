@@ -24,6 +24,42 @@ class TwoLayerMLP(nn.Module):
         return self.fc2(self.relu(self.fc1(x)))
 
 
+class SimpleCNN(nn.Module):
+    """Two conv layers with BatchNorm, then a linear head."""
+    def __init__(self) -> None:
+        super().__init__()
+        self.features = nn.Sequential(
+            nn.Conv2d(3, 32, 3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, 3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d(1),
+        )
+        self.classifier = nn.Linear(64, 10)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.features(x)
+        x = x.view(x.size(0), -1)
+        return self.classifier(x)
+
+
+class ConvOnlyCNN(nn.Module):
+    """Conv layers without BatchNorm."""
+    def __init__(self) -> None:
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(3, 16, 3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(16, 32, 3, padding=1),
+            nn.ReLU(),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
 class ThreeLayerMLP(nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -297,3 +333,123 @@ class TestStructuredPrune:
         # Hidden layers pruned
         assert pruned[0].out_features == 64  # 128 * 0.5
         assert pruned[2].out_features == 32  # 64 * 0.5
+
+
+class TestConv2dStructuredPrune:
+    def test_conv_reduces_channels(self) -> None:
+        model = ConvOnlyCNN()
+        stage = StructuredPrune(sparsity=0.5, protect_output=False)
+        ctx = PipelineContext(original_model=model)
+        pruned = stage.apply(model, ctx)
+
+        # First conv: out_channels 16 → 8
+        assert pruned.net[0].out_channels == 8
+        # Second conv: in_channels matches, out_channels also pruned
+        assert pruned.net[2].in_channels == 8
+        assert pruned.net[2].out_channels == 16
+
+    def test_conv_forward_works(self) -> None:
+        model = ConvOnlyCNN()
+        stage = StructuredPrune(sparsity=0.5, protect_output=False)
+        ctx = PipelineContext(original_model=model)
+        pruned = stage.apply(model, ctx)
+
+        x = torch.randn(2, 3, 8, 8)
+        out = pruned(x)
+        assert out.shape == (2, 16, 8, 8)
+
+    def test_conv_with_batchnorm(self) -> None:
+        model = SimpleCNN()
+        stage = StructuredPrune(sparsity=0.5, protect_output=True)
+        ctx = PipelineContext(original_model=model)
+        pruned = stage.apply(model, ctx)
+
+        # First conv: 32 → 16 channels
+        conv1 = pruned.features[0]
+        bn1 = pruned.features[1]
+        conv2 = pruned.features[3]
+        bn2 = pruned.features[4]
+
+        assert conv1.out_channels == 16
+        assert bn1.num_features == 16
+        assert bn1.weight.shape[0] == 16
+        assert bn1.running_mean.shape[0] == 16
+        assert conv2.in_channels == 16
+
+        # Second conv is output of features Sequential → protected
+        assert conv2.out_channels == 64
+        assert bn2.num_features == 64
+        # Classifier input stays matching conv2 output (both unchanged)
+        assert pruned.classifier.in_features == 64
+
+    def test_conv_batchnorm_forward(self) -> None:
+        model = SimpleCNN()
+        stage = StructuredPrune(sparsity=0.5, protect_output=True)
+        ctx = PipelineContext(original_model=model)
+        pruned = stage.apply(model, ctx)
+
+        x = torch.randn(2, 3, 8, 8)
+        out = pruned(x)
+        assert out.shape == (2, 10)
+
+    def test_conv_fewer_params(self) -> None:
+        model = SimpleCNN()
+        params_before = sum(p.numel() for p in model.parameters())
+        stage = StructuredPrune(sparsity=0.5, protect_output=True)
+        ctx = PipelineContext(original_model=model)
+        pruned = stage.apply(model, ctx)
+        params_after = sum(p.numel() for p in pruned.parameters())
+        assert params_after < params_before
+
+    def test_conv_protect_output(self) -> None:
+        """Last conv (no downstream conv) should be protected."""
+        model = ConvOnlyCNN()
+        stage = StructuredPrune(sparsity=0.5, protect_output=True)
+        ctx = PipelineContext(original_model=model)
+        pruned = stage.apply(model, ctx)
+
+        # First conv pruned
+        assert pruned.net[0].out_channels == 8
+        # Second conv (output) protected
+        assert pruned.net[2].out_channels == 32
+        assert pruned.net[2].in_channels == 8
+
+    def test_conv_l2_criterion(self) -> None:
+        model = ConvOnlyCNN()
+        stage = StructuredPrune(sparsity=0.25, criterion="l2", protect_output=False)
+        ctx = PipelineContext(original_model=model)
+        pruned = stage.apply(model, ctx)
+
+        assert pruned.net[0].out_channels == 12  # 16 * 0.75
+        assert pruned.net[2].in_channels == 12
+
+    def test_validate_reports_conv_layers(self) -> None:
+        """Conv-only model should pass validation."""
+        model = ConvOnlyCNN()
+        stage = StructuredPrune()
+        warnings = stage.validate(model)
+        assert len(warnings) == 0
+
+    def test_conv_no_bias(self) -> None:
+        model = nn.Sequential(
+            nn.Conv2d(3, 16, 3, padding=1, bias=False),
+            nn.ReLU(),
+            nn.Conv2d(16, 32, 3, padding=1, bias=False),
+        )
+        stage = StructuredPrune(sparsity=0.5, protect_output=False)
+        ctx = PipelineContext(original_model=model)
+        pruned = stage.apply(model, ctx)
+
+        assert pruned[0].out_channels == 8
+        assert pruned[0].bias is None
+        x = torch.randn(1, 3, 4, 4)
+        out = pruned(x)
+        assert out.shape == (1, 16, 4, 4)
+
+    def test_pipeline_integration_conv(self) -> None:
+        model = SimpleCNN()
+        result = compress(model, recipe=[StructuredPrune(sparsity=0.3)])
+        assert result.model is not None
+        x = torch.randn(1, 3, 8, 8)
+        out = result.model(x)
+        assert out.shape == (1, 10)
