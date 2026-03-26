@@ -216,6 +216,43 @@ result = lob.Pipeline([
 
 **Note:** Conv2d chains are only detected within `nn.Sequential` containers to avoid breaking skip/residual connections. Models with residual blocks (ResNet, etc.) will have their conv layers automatically protected.
 
+### Low-Rank Decomposition
+
+Replace weight matrices with low-rank SVD approximations, factoring a single layer into two smaller layers:
+
+```python
+import lobotomizer as lob
+
+# Fraction-based: keep 50% of singular values
+result = lob.Pipeline([
+    lob.LowRank(rank_fraction=0.5),
+]).run(model)
+
+# Energy-based: keep enough singular values for 90% spectral energy
+result = lob.Pipeline([
+    lob.LowRank(rank_fraction=0.9, criterion="energy"),
+]).run(model)
+```
+
+| Parameter | Description |
+|---|---|
+| `rank_fraction` | Fraction of rank to keep (fraction mode) or energy to preserve (energy mode) |
+| `criterion` | `"fraction"` (default) or `"energy"` |
+| `min_rank` | Minimum rank to preserve (default: 1) |
+| `min_compression` | Only decompose if result is ≤ this fraction of original params (default: 0.9) |
+| `exclude_layers` | Named layers to skip |
+
+Works on both `nn.Linear` and `nn.Conv2d` layers. Conv2d layers are decomposed into a spatial conv (original kernel) followed by a 1×1 conv.
+
+YAML recipe:
+
+```yaml
+stages:
+  - type: low_rank
+    rank_fraction: 0.5
+    criterion: energy
+```
+
 ## How It Works
 
 ```
@@ -249,7 +286,8 @@ Each script is self-contained and falls back to a dummy model if optional depend
 
 - [x] Prune, Quantize, Pipeline, profiler, recipes, CLI
 - [x] Knowledge distillation (logit, feature)
-- [ ] Sparsity and low-rank techniques
+- [x] Low-rank decomposition (SVD)
+- [ ] Sparsity techniques
 - [ ] Hardware support (ONNX, profiling, and stuff like that)
 - [ ] Search & automation (sweeps, finding lobotomization pipelines to hit given targets)
 
