@@ -13,6 +13,7 @@ from lobotomizer.stages.distill import Distill
 from lobotomizer.stages.low_rank import LowRank
 from lobotomizer.stages.structured_prune import StructuredPrune
 from lobotomizer.core.registry import register_adapter, register_stage
+from lobotomizer.export import to_onnx
 
 if TYPE_CHECKING:
     import torch.nn as nn
@@ -31,6 +32,7 @@ __all__ = [
     "compress",
     "register_adapter",
     "register_stage",
+    "to_onnx",
 ]
 
 

@@ -253,6 +253,30 @@ stages:
     criterion: energy
 ```
 
+### ONNX Export
+
+Export compressed models to ONNX for deployment with ONNX Runtime, TensorRT, etc:
+
+```python
+import lobotomizer as lob
+
+result = lob.compress(model, recipe="balanced")
+
+# From Result object
+result.to_onnx("model.onnx", input_shape=(1, 3, 224, 224))
+
+# Standalone function
+lob.to_onnx(model, "model.onnx", input_shape=(1, 3, 224, 224))
+```
+
+CLI:
+
+```bash
+lobotomize model.pt --recipe balanced --export-onnx model.onnx --input-shape "1,3,224,224"
+```
+
+Optional: install `onnx` for verification, `onnxsim` for graph simplification.
+
 ## How It Works
 
 ```
@@ -288,7 +312,8 @@ Each script is self-contained and falls back to a dummy model if optional depend
 - [x] Knowledge distillation (logit, feature)
 - [x] Low-rank decomposition (SVD)
 - [ ] Sparsity techniques
-- [ ] Hardware support (ONNX, profiling, and stuff like that)
+- [x] ONNX export (API, CLI, Result method)
+- [ ] Hardware profiling and optimization
 - [ ] Search & automation (sweeps, finding lobotomization pipelines to hit given targets)
 
 Over time: progressively support and wrap more techniques, layer types, tools, etc. 
