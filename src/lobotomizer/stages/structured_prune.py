@@ -133,6 +133,16 @@ class StructuredPrune(Stage):
                         layer_name,
                     )
 
+        # Skip grouped/depthwise Conv2d — pruning dim 1 is incorrect for groups > 1
+        for layer in _all_prunable(model):
+            if isinstance(layer, nn.Conv2d) and layer.groups > 1:
+                layer_name = module_to_name.get(layer, "<unknown>")
+                skip.add(layer)
+                logger.info(
+                    "Skipping grouped Conv2d '%s' (groups=%d) — not supported.",
+                    layer_name, layer.groups,
+                )
+
         # First pass: compute keep indices
         pruned_outputs: dict[PrunableLayer, torch.Tensor] = {}
         for layer in _all_prunable(model):
@@ -178,7 +188,7 @@ class StructuredPrune(Stage):
             else:
                 scores = weight.norm(p=2, dim=1)
         else:
-            # Conv2d: (out_channels, in_channels, kH, kW) → flatten per filter
+            # Conv2d: (out_channels, in_channels/groups, kH, kW) → flatten per filter
             flat = weight.view(n_out, -1)
             if self._criterion == "l1":
                 scores = flat.abs().sum(dim=1)

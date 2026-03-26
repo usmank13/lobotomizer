@@ -203,6 +203,37 @@ class TestLowRankConv2d:
         params_after = sum(p.numel() for p in result.parameters())
         assert params_after < params_before
 
+    def test_grouped_conv_skipped(self) -> None:
+        """Grouped Conv2d should be skipped."""
+        model = nn.Sequential(
+            nn.Conv2d(8, 8, 3, padding=1, groups=4),
+            nn.ReLU(),
+            nn.Conv2d(8, 64, 3, padding=1),
+        )
+        params_before = model[0].weight.numel()
+        stage = LowRank(rank_fraction=0.25, min_compression=1.0)
+        ctx = PipelineContext(original_model=model)
+        result = stage.apply(model, ctx)
+
+        # Grouped conv should NOT be decomposed
+        assert isinstance(result[0], nn.Conv2d)
+        assert result[0].groups == 4
+        # Standard conv may be decomposed
+        assert isinstance(result[2], nn.Sequential) or isinstance(result[2], nn.Conv2d)
+
+    def test_depthwise_conv_skipped(self) -> None:
+        """Depthwise separable Conv2d should be skipped."""
+        model = nn.Sequential(
+            nn.Conv2d(16, 16, 3, padding=1, groups=16),
+            nn.Conv2d(16, 64, 1),
+        )
+        stage = LowRank(rank_fraction=0.25, min_compression=1.0)
+        ctx = PipelineContext(original_model=model)
+        result = stage.apply(model, ctx)
+
+        assert isinstance(result[0], nn.Conv2d)
+        assert result[0].groups == 16
+
     def test_conv_preserves_stride_padding(self) -> None:
         model = nn.Sequential(
             nn.Conv2d(3, 64, 3, stride=2, padding=1),
