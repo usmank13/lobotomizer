@@ -181,6 +181,26 @@ class Result:
         }
         (p / "metadata.json").write_text(json.dumps(meta, indent=2))
 
+    def to_onnx(
+        self,
+        output_path: str,
+        input_shape: tuple[int, ...],
+        **kwargs,
+    ):
+        """Export the compressed model to ONNX format.
+
+        Parameters
+        ----------
+        output_path : str
+            Where to save the .onnx file.
+        input_shape : tuple
+            Shape of dummy input (including batch dimension).
+        **kwargs
+            Passed to :func:`lobotomizer.export.to_onnx`.
+        """
+        from lobotomizer.export import to_onnx
+        return to_onnx(self._compressed_model, output_path, input_shape, **kwargs)
+
 
 def _fmt(v: Any) -> str:
     if v is None:

@@ -28,6 +28,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"], help="Device (default: cpu)")
     parser.add_argument("--profile-only", action="store_true", help="Only profile the model, don't compress")
     parser.add_argument("--list-recipes", action="store_true", help="List available built-in recipes")
+    parser.add_argument("--export-onnx", metavar="PATH", help="Export result to ONNX format at this path")
+    parser.add_argument("--opset", type=int, default=17, help="ONNX opset version (default: 17)")
     return parser.parse_args(argv)
 
 
@@ -135,6 +137,21 @@ def main(argv: list[str] | None = None) -> None:
     if args.output:
         result.save(args.output)
         print(f"\nSaved to {args.output}/")
+
+    # ONNX export
+    if args.export_onnx:
+        if not input_shape:
+            print("Error: --input-shape is required for --export-onnx", file=sys.stderr)
+            sys.exit(1)
+        from lobotomizer.export import to_onnx
+        onnx_path = to_onnx(
+            result.model, args.export_onnx,
+            input_shape=input_shape,
+            opset_version=args.opset,
+            device=args.device,
+        )
+        size_mb = onnx_path.stat().st_size / (1024 * 1024)
+        print(f"\nExported ONNX: {onnx_path} ({size_mb:.2f} MB)")
 
 
 if __name__ == "__main__":
