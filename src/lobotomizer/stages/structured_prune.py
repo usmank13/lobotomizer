@@ -22,6 +22,14 @@ _PASSTHROUGH_TYPES = (
     nn.Identity, nn.MaxPool2d, nn.AvgPool2d, nn.AdaptiveAvgPool2d,
 )
 
+# Module types whose children have implicit dimension coupling that
+# chain detection can't discover from structure alone (e.g. attention
+# q/k/v projections must stay compatible).  Prunable layers inside
+# these containers are skipped by default.
+_UNSAFE_CONTAINERS: tuple[type[nn.Module], ...] = (
+    nn.MultiheadAttention,
+)
+
 
 class StructuredPrune(Stage):
     """Remove entire neurons/filters from Linear and Conv2d layers.
@@ -45,6 +53,10 @@ class StructuredPrune(Stage):
         layers with no downstream consumer — from pruning.
     exclude_layers : set[str] | list[str] | None
         Named layers to exclude from pruning entirely.
+    unsafe_containers : tuple[type[nn.Module], ...] | None
+        Module types whose children have implicit dimension coupling
+        and should be skipped by default.  Pass ``()`` to disable.
+        Defaults to ``_UNSAFE_CONTAINERS`` (includes ``nn.MultiheadAttention``).
     """
 
     def __init__(
@@ -53,6 +65,7 @@ class StructuredPrune(Stage):
         criterion: Literal["l1", "l2"] = "l1",
         protect_output: bool = True,
         exclude_layers: set[str] | list[str] | None = None,
+        unsafe_containers: tuple[type[nn.Module], ...] | None = None,
     ) -> None:
         if not 0.0 <= sparsity < 1.0:
             raise ValueError(f"Sparsity must be in [0, 1), got {sparsity}")
@@ -62,6 +75,9 @@ class StructuredPrune(Stage):
         self._criterion = criterion
         self._protect_output = protect_output
         self._exclude_layers: set[str] = set(exclude_layers) if exclude_layers else set()
+        self._unsafe_containers: tuple[type[nn.Module], ...] = (
+            unsafe_containers if unsafe_containers is not None else _UNSAFE_CONTAINERS
+        )
 
     @property
     def name(self) -> str:
@@ -130,6 +146,23 @@ class StructuredPrune(Stage):
                     skip.add(layer)
                     logger.info(
                         "Protecting output layer '%s' from pruning (no downstream consumer).",
+                        layer_name,
+                    )
+
+        # Skip layers inside unsafe containers (e.g. attention projections)
+        if self._unsafe_containers:
+            unsafe_children: set[nn.Module] = set()
+            for mod in model.modules():
+                if isinstance(mod, self._unsafe_containers):
+                    for child in mod.modules():
+                        if child is not mod and isinstance(child, _PRUNABLE):
+                            unsafe_children.add(child)
+            for layer in unsafe_children:
+                if layer not in skip:
+                    layer_name = module_to_name.get(layer, "<unknown>")
+                    skip.add(layer)
+                    logger.info(
+                        "Skipping layer '%s' inside unsafe container (implicit dimension coupling).",
                         layer_name,
                     )
 
